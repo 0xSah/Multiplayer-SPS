@@ -4,16 +4,13 @@ import threading
 import queue
 import json
 
-# Queue for user inputs from the separate thread
 input_queue = queue.Queue()
-# Map choices to readable names
 choice_map = {"R": "Stone", "P": "Paper", "S": "Scissors"}
-# Track game state
-game_state = "initial"  # initial, waiting, playing, ended
+game_state = "initial"
 waiting_for_choice = False
 
 def input_thread():
-    """Collect user input in a separate thread and add to the queue."""
+    """Collect user input in a separate thread."""
     while True:
         user_input = input()
         input_queue.put(user_input.strip())
@@ -23,21 +20,23 @@ async def client():
     global game_state, waiting_for_choice
 
     print("Welcome to Stone, Paper, Scissors!")
-    # Clear any stray inputs before the first prompt
     while not input_queue.empty():
         input_queue.get_nowait()
     username = input("Enter your username: ").strip()
 
-    # Clear queue again before the next prompt
+    # Ask for server IPv6 address and port
+    server_ip = input("Enter the server IPv6 address (e.g., 2001:db8::1): ").strip()
+    server_port = input("Enter the server port (e.g., 8765): ").strip()
+    server_uri = f"ws://[{server_ip}]:{server_port}"
+
     while not input_queue.empty():
         input_queue.get_nowait()
     choice = input("Type 'create' to create a room or 'join' to join a room: ").lower()
 
-    # Start the input thread only after all initial synchronous prompts
     input_thread_instance = threading.Thread(target=input_thread, daemon=True)
     input_thread_instance.start()
 
-    async with websockets.connect("ws://localhost:8765") as websocket:
+    async with websockets.connect(server_uri) as websocket:
         if choice == "create":
             await websocket.send(json.dumps({
                 "action": "create_room",
@@ -45,7 +44,6 @@ async def client():
             }))
             game_state = "waiting"
         elif choice == "join":
-            # Clear queue before token prompt
             while not input_queue.empty():
                 input_queue.get_nowait()
             token = input("Enter the room token: ").strip()
@@ -124,7 +122,6 @@ async def client():
             except asyncio.TimeoutError:
                 if not waiting_for_choice:
                     while not input_queue.empty():
-                        input_queue.get_nowait()  # Clear stray inputs outside rounds
+                        input_queue.get_nowait()
 
-# Run the client
 asyncio.run(client())

@@ -2,6 +2,7 @@ import asyncio
 import websockets
 import json
 import uuid
+import socket
 
 # Store rooms: token -> room state
 rooms = {}
@@ -20,7 +21,7 @@ def determine_winner(choices):
     choices_list = ["R", "P", "S"]
     index1 = choices_list.index(choices[0])
     index2 = choices_list.index(choices[1])
-    return 0 if (index1 - index2) % 3 == 1 else 1  # 0: Player 1 wins, 1: Player 2 wins
+    return 0 if (index1 - index2) % 3 == 1 else 1
 
 async def run_game(token):
     """Run a 3-round game for a room."""
@@ -47,7 +48,6 @@ async def run_game(token):
             "scores": room["scores"],
             "choices": room["choices"]
         })
-    # Determine overall winner
     scores = room["scores"]
     usernames = room["player_usernames"]
     overall_winner = usernames[0] if scores[0] > scores[1] else usernames[1] if scores[1] > scores[0] else "Tie"
@@ -56,7 +56,6 @@ async def run_game(token):
         "winner": overall_winner,
         "final_scores": scores
     })
-    # Clean up
     del rooms[token]
     for ws in room["players"]:
         if ws in player_rooms:
@@ -69,7 +68,6 @@ async def handle_client(websocket, path):
         async for message in websocket:
             data = json.loads(message)
             action = data.get("action")
-
             if action == "create_room":
                 if len(rooms) >= 50:
                     await websocket.send(json.dumps({
@@ -96,7 +94,6 @@ async def handle_client(websocket, path):
                     "status": "waiting_for_opponent",
                     "message": "Waiting for another player to join..."
                 }))
-
             elif action == "join_room":
                 token = data.get("token")
                 if not isinstance(token, str) or token not in rooms:
@@ -123,7 +120,6 @@ async def handle_client(websocket, path):
                     "message": f"Game starting! {usernames[0]} vs {usernames[1]}"
                 })
                 asyncio.create_task(run_game(token))
-
             elif action == "play":
                 token = player_rooms.get(websocket)
                 if token and rooms[token]["round"] > 0:
@@ -136,7 +132,6 @@ async def handle_client(websocket, path):
                             "status": "error",
                             "message": "Invalid choice or already submitted"
                         }))
-
     except websockets.ConnectionClosed:
         token = player_rooms.get(websocket)
         if token and token in rooms:
@@ -154,8 +149,25 @@ async def handle_client(websocket, path):
         if websocket in player_rooms:
             del player_rooms[websocket]
 
-# Start the server
-start_server = websockets.serve(handle_client, "localhost", 8765)
+# Get the machine's IPv6 address
+def get_ipv6_address():
+    """Fetch the local IPv6 address using socket."""
+    s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    try:
+        # Connect to a public IPv6 address (Google DNS) to get local IPv6
+        s.connect(('2001:4860:4860::8888', 80))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = '::1'  # Fallback to IPv6 localhost
+    finally:
+        s.close()
+    return ip
+
+# Start the server on IPv6
+server_ip = get_ipv6_address()
+port = 8765
+# Bind to all IPv6 interfaces (::)
+start_server = websockets.serve(handle_client, "::", port, family=socket.AF_INET6)
 asyncio.get_event_loop().run_until_complete(start_server)
-print("Server running on ws://localhost:8765")
+print(f"Server running on ws://[{server_ip}]:{port}")
 asyncio.get_event_loop().run_forever()
